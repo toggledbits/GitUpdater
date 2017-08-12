@@ -70,7 +70,7 @@ passed back by the prior call to checkForUpdates().
 
 ```
 if canUpdate then
-    local success, newId = GitUpdater.doUpdate( "githubuser", "reponame", updateInfo )
+    local success, newId = GitUpdater.doUpdate( updateInfo )
     if success then
         luup.variable_set( myServiceId, "GitHubReleaseId", myDeviceNum )
         luup.reload()

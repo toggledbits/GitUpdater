@@ -237,7 +237,7 @@ function checkForUpdate( guser, grepo, lastUpdateId, forceHead )
         else
             L("%1 update available %2 (%3)", grepo, newest.tag_name, newest.id)
         end
-        return true, { tag=newest.tag_name, id=newest.id, published=newest.pubdate, tarball=newest.tarball_url, name=newest.name, comment=newest.body }
+        return true, { repository={ name=grepo, ['user']=guser }, tag=newest.tag_name, id=newest.id, published=newest.pubdate, tarball=newest.tarball_url, name=newest.name, comment=newest.body }
     end
     
     -- Nah.
@@ -246,7 +246,9 @@ function checkForUpdate( guser, grepo, lastUpdateId, forceHead )
 end
 
 -- Perform an update using information previously provided by checkForUpdate()
-function doUpdate( guser, grepo, uInfo )
+function doUpdate( uInfo )
+    local guser = uInfo.repository['user']
+    local grepo = uInfo.repository.name
     local err, body, httpStatus
     L("attempting to update %1/%2 to %3 (%4)", guser, grepo, uInfo.tag, uInfo.id )
 
@@ -298,7 +300,13 @@ function doUpdate( guser, grepo, uInfo )
         for i, ff in ipairs(uf) do
             D("doUpdate() considering copying %1/%2", fd, ff['name'])
             if ff['type'] == "f" and not ignoreFiles[ff['name']] then
-                local st = os.execute("umask 022 && cp '" .. fd .. "/" .. ff['name'] .. "' /etc/cmh-ludl/")
+                if luup then
+                    -- On Vera, compress the source file in the installation directory
+                    st = os.execute("umask 022 && pluto-lzo c '" .. fd .. "/" .. ff['name'] .. "' '/etc/cmh-ludl/" .. ff['name'] .. "'")
+                else
+                    -- Elsewhere, just copy it. ??? Can we detect openLuup somehow?
+                    st = os.execute("umask 022 && cp '" .. fd .. "/" .. ff['name'] .. "' /etc/cmh-ludl/")
+                end
                 if st == 0 then nCopy = nCopy + 1
                 else
                     D("doUpdate(): failed to install %1, status %2... that's not good!", fd .. "/" .. ff['name'], st)
