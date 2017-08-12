@@ -182,10 +182,8 @@ local function loadIgnoreFiles( dir )
     local fh = io.open(dir .. "/.guignore", "r")
     if fh == nil then return t end
     local ll
-    local n = 1
     for ll in fh:lines() do
-        t[ll] = n
-        n = n + 1
+        t[ll] = true
     end
     return t
 end
@@ -299,7 +297,7 @@ function doUpdate( uInfo )
         local nCopy = 0
         for i, ff in ipairs(uf) do
             D("doUpdate() considering copying %1/%2", fd, ff['name'])
-            if ff['type'] == "f" and not ignoreFiles[ff['name']] then
+            if ff['type'] == "f" and not (ff['name']:find("^%.") or ignoreFiles[ff['name']]) then
                 if luup then
                     -- On Vera, compress the source file in the installation directory
                     st = os.execute("umask 022 && pluto-lzo c '" .. fd .. "/" .. ff['name'] .. "' '/etc/cmh-ludl/" .. ff['name'] .. "'")
