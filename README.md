@@ -146,6 +146,29 @@ frequently, so this approach may give a reasonable frequency to updates without 
 checks. It also allows user to cause update checks, as Luup reloads are easily initiated by the user from the Vera
 dashboard.
 
+## Side-Effects ##
+
+Vera maintains versions of plugin code in its store (using svn or cvs?), and maintains an agreement between its version
+and an installed version. Directly changing the installed code on the Vera as I am currently doing in GitUpdater has no
+effect on the installed version number of the plugin, so even though the plugin may be getting updates, neither the Vera
+not the Vera Store are aware of any updates. This is probably OK for a while, but could leave to confusion on the part of the user.
+
+As a recommended hedge against such confusion, I recommend that developers periodically push their latest, stable release
+from their GitHub repository into the Vera Store. Eventually, remote Veras will be updated through the Vera store, although
+that update will effectively install the same code that GitUpdater has already installed. Thus, this update merely updates
+Vera's idea of the version number, and a peaceful coexistence between the two systems should prevail. Of course, this
+makes the inconvenience of updating through the Vera store an ongoing necessity, but it can be done with much lower frequency,
+and the benefit GitUpdater provides of faster updates when hotfixes or interim releases are published is still realized.
+
+Conversely, it is theoretically possible that the Vera store could be used to publish the first, base version of the plugin,
+and no updates are ever subsequently published to the store by the developer, leaving all updates to be done through GitUpdater. 
+This gives the developer the exposure, and users ease of installation, that the Vera store can offer, while relieving the 
+developer of any further trials in managing updates through the store.
+
+Of course, it should go without saying that Vera could change the way plugins are installed, change file or directory permissions, or make
+other system changes that would render GitUpdater unable to perform its work. At the moment, however, it seems that Vera has much
+greater interests in other areas than what is going on in their plugin community.
+
 ## Reporting Bugs/Enhancement Requests ##
 
 Bug reports and enhancement requests are welcome! Please use the "Issues" link for the repository to open a new bug report or make an enhancement request.
