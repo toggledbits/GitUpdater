@@ -61,7 +61,7 @@ To determine if an update is available, the plugin should load GitUpdater and ca
 
 ```GitUpdater = require("GitUpdater")
 lastVersionId = luup.variable_get( myServiceId, "GitHubReleaseId", myDeviceNum )
-canUpdate, updateInfo = GitUpdater.checkForUpdates( "githubuser", "reponame", lastVersionId, lastVersionId == nil )```
+canUpdate, updateInfo = GitUpdater.checkForUpdates( "githubuser", "reponame", lastVersionId, lastVersionId == nil )'''
 
 Immediately or at some point later, the plugin can then call for the update to occur, using the information
 passed back by the prior call to checkForUpdates().
@@ -72,7 +72,7 @@ passed back by the prior call to checkForUpdates().
         luup.variable_set( myServiceId, "GitHubReleaseId", myDeviceNum )
         luup.reload()
     end
-end```
+end'''
 
 Let's break down how this works, line by line.
 
