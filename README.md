@@ -59,7 +59,8 @@ it should be possible for any plugin to benefit from its use.
 
 To determine if an update is available, the plugin should load GitUpdater and call checkForUpdates().
 
-```GitUpdater = require("GitUpdater")
+```
+GitUpdater = require("GitUpdater")
 lastVersionId = luup.variable_get( myServiceId, "GitHubReleaseId", myDeviceNum )
 canUpdate, updateInfo = GitUpdater.checkForUpdates( "githubuser", "reponame", lastVersionId, lastVersionId == nil )
 ```
@@ -67,14 +68,15 @@ canUpdate, updateInfo = GitUpdater.checkForUpdates( "githubuser", "reponame", la
 Immediately or at some point later, the plugin can then call for the update to occur, using the information
 passed back by the prior call to checkForUpdates().
 
-```if canUpdate then
+```
+if canUpdate then
     local success, newId = GitUpdater.doUpdate( "githubuser", "reponame", updateInfo )
     if success then
         luup.variable_set( myServiceId, "GitHubReleaseId", myDeviceNum )
         luup.reload()
     end
 end
-'''
+```
 
 Let's break down how this works, line by line.
 
