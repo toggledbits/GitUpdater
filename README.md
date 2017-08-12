@@ -131,6 +131,18 @@ these listed files. Whether or not a <tt>.guignore</tt> file is provided, GitUpd
 
 ## Additional Considerations for Developers ##
 
+### Defensive Loading ###
+
+Plugin developers can check to see if GitUpdater is installed and available by using an anonymous function/lambda
+to wrap require() in a pcall, thus:
+
+```
+local GitUpdater = nil
+pcall( function() GitUpdater = require('GitUpdater') end )
+if GitUpdater then
+    canUpdate, updateInfo = GitUpdater.checkForUpdate( ... etc ... )
+```
+
 ### Timing and Frequency of Updates ###
 
 The checkForUpdate() and doUpdate() calls have been coded as separate functions because it may
