@@ -57,16 +57,16 @@ it should be possible for any plugin to benefit from its use.
 
 ### Determining if Updates are Available ###
 
-To determine if an update is available, the plugin should load GitUpdater and call checkForUpdates().
+To determine if an update is available, the plugin should load GitUpdater and call checkForUpdate().
 
 ```
 GitUpdater = require("GitUpdater")
 lastVersionId = luup.variable_get( myServiceId, "GitHubReleaseId", myDeviceNum )
-canUpdate, updateInfo = GitUpdater.checkForUpdates( "githubuser", "reponame", lastVersionId, lastVersionId == nil )
+canUpdate, updateInfo = GitUpdater.checkForUpdate( "githubuser", "reponame", lastVersionId, lastVersionId == nil )
 ```
 
 Immediately or at some point later, the plugin can then call for the update to occur, using the information
-passed back by the prior call to checkForUpdates().
+passed back by the prior call to checkForUpdate().
 
 ```
 if canUpdate then
@@ -85,24 +85,24 @@ require() will load it. Either way, the module reference is returned.
 
 Line 2 gets the GitHub release ID of the currently installed version of the plugin.
 
-Line 3 calls GitUpdater's checkForUpdates() function, passing the GitHub username, repository name,
+Line 3 calls GitUpdater's checkForUpdate() function, passing the GitHub username, repository name,
 and the release ID determine in line 2. The fourth parameter, a boolean called "forceNewest",
-will always cause checkForUpdates() to indicate that an update should be made to latest GitHub release.
+will always cause checkForUpdate() to indicate that an update should be made to latest GitHub release.
 Typically, this should only be set true if the current release ID is not store or otherwise unknown, as is shown here.
-checkForUpdates() will return two parameters: a boolean indicating updates are available (true), or not (false); and
+checkForUpdate() will return two vallues: a boolean indicating updates are available (true), or not (false); and
 a table containing information about the newest release eligible.
 
 Line 4 determines if an update is available, and if so...
 
-Line 5 performs the update by passing the GitHub username, repository name, and release information table (returned
-by checkForUpdates()). The doUpdate() function itself then returns two parameters. The first is a boolean success flag,
+Line 5 calls doUpdate() to perform the update, passing the release information table previously returned
+by checkForUpdate(). The doUpdate() function itself returns two values. The first is a boolean success flag,
 which if true indicates that the update was completed. In this case, the second return value is the ID of the installed
-release, which the plugin must store so it can use it in subsequent calls to checkForUpdates(). If the first return value
+release, which the plugin must store so it can use it in subsequent calls to checkForUpdate(). If the first return value
 is false (update failed), the second value is an error message indicating the reason for the failure.
 
 Line 6 determines if the doUpdate() call was successful, and if so...
 
-Line 7 stores the release ID returned by doUpdate().
+Line 7 stores the release ID returned by doUpdate(), for the benefit of later calls to checkForUpdate().
 
 Line 8 restarts Luup. This is an important step after a successful update, as the new plugin code will not be running
 until Luup reloads.
@@ -131,7 +131,9 @@ these listed files. Whether or not a <tt>.guignore</tt> file is provided, GitUpd
 
 ## Additional Considerations for Developers ##
 
-The checkForUpdates() and doUpdate() calls have been coded as separate functions because it may
+### Timing and Frequency of Updates ###
+
+The checkForUpdate() and doUpdate() calls have been coded as separate functions because it may
 be the case that a develop would want to make a user aware of an update, but defer the update until
 a later time and/or after the user approves it. 
 
@@ -146,14 +148,14 @@ frequently, so this approach may give a reasonable frequency to updates without 
 checks. It also allows user to cause update checks, as Luup reloads are easily initiated by the user from the Vera
 dashboard.
 
-## Side-Effects ##
+### Side-Effects ###
 
 Vera maintains versions of plugin code in its store (using svn or cvs?), and maintains an agreement between its version
 and an installed version. Directly changing the installed code on the Vera as I am currently doing in GitUpdater has no
 effect on the installed version number of the plugin, so even though the plugin may be getting updates, neither the Vera
 not the Vera Store are aware of any updates. This is probably OK for a while, but could leave to confusion on the part of the user.
 
-As a recommended hedge against such confusion, I recommend that developers periodically push their latest, stable release
+As a recommended hedge against such confusion, developers can periodically push their latest, stable release
 from their GitHub repository into the Vera Store. Eventually, remote Veras will be updated through the Vera store, although
 that update will effectively install the same code that GitUpdater has already installed. Thus, this update merely updates
 Vera's idea of the version number, and a peaceful coexistence between the two systems should prevail. Of course, this
@@ -168,6 +170,10 @@ developer of any further trials in managing updates through the store.
 Of course, it should go without saying that Vera could change the way plugins are installed, change file or directory permissions, or make
 other system changes that would render GitUpdater unable to perform its work. At the moment, however, it seems that Vera has much
 greater interests in other areas than what is going on in their plugin community.
+
+### Encrypted Plugin Files ###
+
+Currently, GitUpdater does not handle encryption of plugin files.
 
 ## Reporting Bugs/Enhancement Requests ##
 
