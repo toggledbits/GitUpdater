@@ -179,6 +179,10 @@ and no updates are ever subsequently published to the store by the developer, le
 This gives the developer the exposure, and users ease of installation, that the Vera store can offer, while relieving the 
 developer of any further trials in managing updates through the store.
 
+Taking this notion to the extreme, it is possible that the first, base version of any plugin could simply be a minimal template
+implementation that does nothing more than call GitUpdater to get and install the latest code from GitHub. The plugin is 
+effectively loading a "bootloader" from the Vera store, leaving GitUpdater to bring in the rest of the code on the first run.
+
 Of course, it should go without saying that Vera could change the way plugins are installed, change file or directory permissions, or make
 other system changes that would render GitUpdater unable to perform its work. At the moment, however, it seems that Vera has much
 greater interests in other areas than what is going on in their plugin community.
