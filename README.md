@@ -66,8 +66,9 @@ GitUpdater = pcall( require, "GitUpdater" )
 if GitUpdater then
 	-- GitUpdater is installed/available. Get last version installed
 	lastVersionInfo = luup.variable_get( yourServiceId, "GUReleaseInfo", myDeviceNum ) or "0"
-	if lastVersionInfo == "0" then lastVersionInfo = GitUpdate.MASTER_RELEASES end
-	canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate, "githubuser", "reponame", lastVersionId, lastVersionId == GitUpdate.MASTER_RELEASES )
+	if lastVersionInfo == "0" then lastVersionInfo = GitUpdater.MASTER_RELEASES end
+	canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate,
+		"githubuser", "reponame", lastVersionInfo, lastVersionInfo == GitUpdater.MASTER_RELEASES )
 else
 	-- GitUpdater is not installed. Do what you must.
 end
@@ -86,6 +87,7 @@ if GitUpdater and canUpdate then
         -- Store the new revision reference in our state variable (same name used above)
         luup.variable_set( yourServiceId, "GUReleaseInfo", newInfo, myDeviceNum )
         -- Reload Luup to make the plugin changes take effect.
+        luup.log("Plugin updated; reloading luup", 2) -- it's good form to log reason when reloading Luup
         luup.reload()
     end
 end

@@ -1,14 +1,13 @@
--- GitUpdater: A service module for updating Luup plugins from Github
--- (c) 2017 Patrick H. Rigney, All Rights Reserved
+-- GitUpdater: A service module for automating updates to Luup plugins from Github
+-- (c) 2017,2019 Patrick H. Rigney, All Rights Reserved
 -- Distributed under GPL 3.0. For information see the LICENSE file at
---luacheck: std lua51,module,read globals luup debugMode,ignore 542 611 612 614 111/_,no max line length
+--luacheck: std lua51,module,read globals luup,ignore 542 611 612 614 111/_,no max line length
 
 local _M = {}
 
 _M._VERSION="0.2"
 _M._VNUM = 19273
-
-local debugMode = true
+_M.debugMode = false
 
 local https = require("ssl.https")
 local http = require("socket.http")
@@ -45,7 +44,7 @@ end
 local function expand(msg, ...) -- luacheck: ignore 212
 	local str
 	if type(msg) == "table" then
-		str = tostring(msg["prefix"] or "") .. tostring(msg["msg"])
+		str = tostring(msg["prefix"] or "") .. tostring(msg["msg"] or msg[1])
 	else
 		str = "[GitUpdater] " .. msg
 	end
@@ -65,16 +64,21 @@ local function expand(msg, ...) -- luacheck: ignore 212
 end
 
 local function D(msg, ...)
-	if debugMode then
+	if _M.debugMode then
 		local str = expand( msg, ... )
-		if type(debugMode) == "function" then
-			debugMode(str)
+		if type(_M.debugMode) == "function" then
+			_M.debugMode(str)
 		elseif type(luup)=="table" then
 			luup.log(str)
 		else
 			print("* "..str)
 		end
 	end
+end
+
+-- Quote for shell
+local function Q(s)
+	return "'"..s:gsub( "'", "\\'" ).."'"
 end
 
 local function doRequest(url, method, body, timeout)
@@ -176,7 +180,7 @@ local function shallowCopy( t )
 end
 
 local function listFiles( dir )
-	local pdir = io.popen("ls -lau '" .. dir .. "'")
+	local pdir = io.popen("ls -lau " .. Q(dir))
 	local t = {}
 	for fl in pdir:lines() do
 		if fl:sub(1,5):lower() ~= "total" then
@@ -235,17 +239,16 @@ local function matchesAny( arr, str )
 	return false
 end
 
-local function Q(s)
-	return "'"..s:gsub( "'", "\\'" ).."'"
-end
-
+-- uInfo for generic channel: releases from master
 _M.MASTER_RELEASES = { ['type']="rel", branch="master" }
 
+-- Create uInfo to check/install releases from specified branch
 local function getReleaseChannel( branch )
 	if ( branch or "master" ) == "master" then return _M.MASTER_RELEASES end
 	return { ['type']="rel", branch=branch }
 end
 
+-- Create uInfo to check/install HEAD commits from specified branch
 local function getHeadChannel( branch )
 	return { ['type']="branch", branch=branch or "master" }
 end
@@ -259,7 +262,7 @@ end
 local function checkForUpdate( guser, grepo, uInfo, forceHead )
 	if not uInfo then
 		-- Default highest release associated with master branch
-		uInfo = shallowCopy( MASTER_RELEASES )
+		uInfo = shallowCopy( _M.MASTER_RELEASES )
 	elseif type(uInfo) == "string" then
 		-- Base64 encoded round-trip string from previous doUpdate() call.
 		local mime = require "mime"
@@ -303,10 +306,8 @@ local function checkForUpdate( guser, grepo, uInfo, forceHead )
 			end
 			if ( r.draft or 0 ) == 0 and ( r.prerelease or 0 ) == 0 and
 				(uInfo.branch or "master") == r.target_commitish then
-				local pdate = r['published_at']
-				if newest == nil or pdate > newest.pubdate then
+				if newest == nil or r.published_at > newest.published_at then
 					newest = r
-					newest['pubdate'] = pdate
 				end
 			end
 		end
@@ -326,7 +327,7 @@ local function checkForUpdate( guser, grepo, uInfo, forceHead )
 				branch=uInfo.branch or "master",
 				tag=newest.tag_name,
 				name=newest.name,
-				published=newest.pubdate,
+				published=newest.published_at,
 				comment=newest.body
 			}
 		end
@@ -384,8 +385,8 @@ local function doUpdate( uInfo, installPath )
 		-- Fetch the tarball with the release files
 		D("doUpdate() fetching tarball %1", uInfo.url)
 		local fn = os.tmpname() .. ".tgz"
-		st = os.execute( "curl -s -S -L -o '"..fn.."' '"..uInfo.url.."'" )
-		D("curl -s -S -L -o '"..fn.."' '"..uInfo.url.."' returns %1", st)
+		st = os.execute( "curl -s -S -L -o " .. Q(fn) .. " " .. Q(uInfo.url) )
+		D("curl -s -S -L -o " .. Q(fn) .. " " .. Q(uInfo.url) .. " returns %1", st)
 		if st ~= 0 then error "Download of release archive failed" end
 		local fh = io.open( fn, "r" )
 		if not fh then error "Download of update failed" end
@@ -394,20 +395,20 @@ local function doUpdate( uInfo, installPath )
 		-- Make a temporary directory as a target for un-tarring
 		tmpdir = "/tmp/" .. grepo:lower() .. "-" .. uInfo.tagname:lower():gsub( "^v", "" )
 		D("doUpdate() wrote %1, creating %2", fn, tmpdir)
-		st = os.execute("mkdir -p '" .. tmpdir .. "'")
+		st = os.execute("mkdir -p " .. Q(tmpdir))
 		if st ~= 0 then
-			os.execute( "rm -f -- '"..fn.."'" )
+			os.execute( "rm -f -- " .. Q(fn) )
 			error("Unable to create temporary directory " .. tmpdir)
 		end
 
 		-- Un-tar the temporary file into the temporary directory
 		D("doUpdate() untarring %1 to %2", fn, tmpdir)
-		st = os.execute("cd '" .. tmpdir .. "' && tar xzf '" .. fn .. "'")
+		st = os.execute("cd " .. Q(tmpdir) .. " && tar xzf " .. Q(fn))
 		if st ~= 0 then error "Unable to un-tar release archive" end
 
 		-- Remove tarball now that we're done with it.
-		if not debugMode then
-			os.execute( "rm -f -- '"..fn.."'" )
+		if not _M.debugMode then
+			os.execute( "rm -f -- " .. Q(fn))
 		end
 
 		-- Since the tarball has directory structure we can't control, locate
@@ -424,7 +425,7 @@ local function doUpdate( uInfo, installPath )
 		instfiles = {}
 		tmpdir = os.tmpname():gsub( "/[^/]+$", "/" )
 		tmpdir = tmpdir .. grepo:lower() .. "-" .. uInfo.commit
-		st = os.execute( "mkdir -p '"..tmpdir.."'" )
+		st = os.execute( "mkdir -p " .. Q(tmpdir) )
 		if st ~= 0 then error("Unable to create temporary directory "..tmpdir) end
 		-- Note recursive fetch https://developer.github.com/v3/git/trees/#get-a-tree-recursively
 		local data, httpStatus = jsonQuery( uInfo.url .. "?recursive=1" )
@@ -432,7 +433,7 @@ local function doUpdate( uInfo, installPath )
 		for _,ff in ipairs( data.tree or {} ) do
 			if ff.type == "tree" then
 				D("doUpdate() creating subdirectory for tree %1 as %1/%2", ff.path, tmpdir, ff.path)
-				os.execute( "mkdir -p '" .. tmpdir .. "/" .. ff.path .. "'" )
+				os.execute( "mkdir -p " .. Q(tmpdir .. "/" .. ff.path) )
 			elseif ff.type == "blob" then
 				local fh = io.open( tmpdir .. "/" .. ff.path, "r" )
 				if fh then
@@ -459,7 +460,7 @@ local function doUpdate( uInfo, installPath )
 					fh:close()
 					fs.content = nil
 					-- Move the finished temporary file into place as final.
-					os.execute( "mv -f '"..tmpdir.."/"..ff.path..".tmp' '"..tmpdir.."/"..ff.path.."'" )
+					os.execute( "mv -f -- " .. Q(tmpdir.."/"..ff.path..".tmp") .. " " .. Q(tmpdir.."/"..ff.path) )
 				end
 				local file = ff.path:match( "[^/]+$" )
 				local path = (#ff.path > #file) and ff.path:sub( 1, #ff.path-#file-1 ) or nil
@@ -468,7 +469,7 @@ local function doUpdate( uInfo, installPath )
 				if false and ff.mode then
 					-- Set file mode as specified?
 				else
-					os.execute( "chmod 0644 '"..tmpdir.."/"..ff.path.."'" )
+					os.execute( "chmod 0644 " .. Q(tmpdir.."/"..ff.path) )
 				end
 				if not instdir and file:match("I_%w+%.xml$") then
 					instdir = path
@@ -500,7 +501,7 @@ local function doUpdate( uInfo, installPath )
 			D("doUpdate() copying %1/%2 to %3", tmpdir .. fp, installPath )
 			if luup.openLuup then
 				-- OpenLuup, just copy the file.
-				print("umask 022 && cp -fp -- " .. Q(tmpdir .. "/" .. fp) .. " " .. Q(installPath))
+				D("umask 022 && cp -fp -- " .. Q(tmpdir .. "/" .. fp) .. " " .. Q(installPath))
 				st = os.execute("umask 022 && cp -fp -- " .. Q(tmpdir .. "/" .. fp) .. " " .. Q(installPath))
 			else
 				-- On Vera, compress the source file in the installation directory
@@ -514,9 +515,9 @@ local function doUpdate( uInfo, installPath )
 		end
 	end
 
-	if not debugMode then
+	if not _M.debugMode then
 		-- Clean up
-		os.execute("rm -rf -- '" .. tmpdir .. "'")
+		os.execute("rm -rf -- " .. Q(tmpdir))
 	end
 
 	-- If nothing was copied, it's the same as not updating, so bail.
