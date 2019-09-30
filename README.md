@@ -62,19 +62,24 @@ To determine if an update is available, the plugin should load GitUpdater and ca
 The most basic form looks something like this:
 
 ```
-GitUpdater = pcall( require, "GitUpdater" )
-if GitUpdater then
+ok,GitUpdater = pcall( require, "GitUpdater" )
+if ok then
 	-- GitUpdater is installed/available. Get last version installed
 	lastVersionInfo = luup.variable_get( yourServiceId, "GUReleaseInfo", myDeviceNum ) or "0"
 	if lastVersionInfo == "0" then lastVersionInfo = GitUpdater.MASTER_RELEASES end
-	canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate,
+	ok, canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate,
 		"githubuser", "reponame", lastVersionInfo, lastVersionInfo == GitUpdater.MASTER_RELEASES )
+	if not ok then
+		-- There was an error, and canUpdate will contain the error message
+	end
+	-- No error, canUpdate is boolean true if update available, false otherwise; updateInfo is data
+	-- to pass to doUpdate() below
 else
 	-- GitUpdater is not installed. Do what you must.
 end
 ```
 
-Note that we make extensive use of `pcall()`. This calls the named functions, but does not stop Lua execution if an error occurs. This is a very defensive style of programming that will prevent any errors that occur in GitUpdater from stopping your plugin's operation.
+Note that we make use of `pcall()`. This calls the named function, but does not stop Lua execution if an error occurs. This is a very defensive style of programming that will prevent any errors that occur in GitUpdater from stopping your plugin's operation.
 
 Also note that the first time (ever) that this code is run, the `luup.variable_get()` will return `nil` because the state variable is not defined. The code shown above converts `nil` to "0" via the `or` clause. If the result string is "0", the next line changes the value to `GitUpdate.MASTER_RELEASES`, which is a GitUpdater constant that tells it to source updates from releases made on the Github "master" branch. The value is then passed as the third argument to `checkForUpdate()`. The fourth argument is a boolean that is *true* (only) when the GitUpdater constant is being sent. In all, the first run of `checkForUpdate()` will return update info for the highest release in the master branch. Later, when `doUpdate()` is called, that will be installed, and the `GUReleaseInfo` state variable will be rewritten with a new value to mark that that release has been installed. From there, future trips through the above code will simply pass whatever release information that state variable contains, so updates will only be flagged necessary when a new release, higher than the installed version, is detected in the Github repository.
 
@@ -82,9 +87,11 @@ The `checkForUpdate()` call returns two values. If the first value is `nil`, an 
 
 ```
 if GitUpdater and canUpdate then
-    local newInfo, errMessage = pcall( GitUpdater.doUpdate, updateInfo )
-    if newInfo then
-        -- Store the new revision reference in our state variable (same name used above)
+    local ok, newInfo, errMessage = pcall( GitUpdater.doUpdate, updateInfo )
+	if not ok then
+		-- An error occurred, newInfo contains error message
+	elseif newInfo then
+        -- Update succeeded. Store the new revision reference in our state variable (same name used above)
         luup.variable_set( yourServiceId, "GUReleaseInfo", newInfo, myDeviceNum )
         -- Reload Luup to make the plugin changes take effect.
         luup.log("Plugin updated; reloading luup", 2) -- it's good form to log reason when reloading Luup
@@ -108,7 +115,7 @@ GitUpdater can update from either releases or head commits on any branch; which 
 		lastVersionInfo = getHeadChannel( "stable" ) -- or whatever branch you want
 		forceUpdate = true
 	end
-	canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate, "githubuser", "reponame", lastVersionId, forceUpdate )
+	ok, canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate, "githubuser", "reponame", lastVersionId, forceUpdate )
 ```
 
 If GitUpdater has previously run with another channel, then you must also set the state variable value to "0" to get a correct reinitialization and switch-over to the branch channel.
