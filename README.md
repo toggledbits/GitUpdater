@@ -59,55 +59,59 @@ it should be possible for any plugin to benefit from its use.
 
 To determine if an update is available, the plugin should load GitUpdater and call checkForUpdate().
 
-```
-GitUpdater = require("GitUpdater")
-lastVersionId = luup.variable_get( myServiceId, "GitHubReleaseId", myDeviceNum )
-canUpdate, updateInfo = GitUpdater.checkForUpdate( "githubuser", "reponame", lastVersionId, lastVersionId == nil )
-```
-
-Immediately or at some point later, the plugin can then call for the update to occur, using the information
-passed back by the prior call to checkForUpdate().
+The most basic form looks something like this:
 
 ```
-if canUpdate then
-    local success, newId = GitUpdater.doUpdate( updateInfo )
-    if success then
-        luup.variable_set( myServiceId, "GitHubReleaseId", myDeviceNum )
+GitUpdater = pcall( require, "GitUpdater" )
+if GitUpdater then
+	-- GitUpdater is installed/available. Get last version installed
+	lastVersionInfo = luup.variable_get( yourServiceId, "GUReleaseInfo", myDeviceNum ) or "0"
+	if lastVersionInfo == "0" then lastVersionInfo = GitUpdate.MASTER_RELEASES end
+	canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate, "githubuser", "reponame", lastVersionId, lastVersionId == GitUpdate.MASTER_RELEASES )
+else
+	-- GitUpdater is not installed. Do what you must.
+end
+```
+
+Note that we make extensive use of `pcall()`. This calls the named functions, but does not stop Lua execution if an error occurs. This is a very defensive style of programming that will prevent any errors that occur in GitUpdater from stopping your plugin's operation.
+
+Also note that the first time (ever) that this code is run, the `luup.variable_get()` will return `nil` because the state variable is not defined. The code shown above converts `nil` to "0" via the `or` clause. If the result string is "0", the next line changes the value to `GitUpdate.MASTER_RELEASES`, which is a GitUpdater constant that tells it to source updates from releases made on the Github "master" branch. The value is then passed as the third argument to `checkForUpdate()`. The fourth argument is a boolean that is *true* (only) when the GitUpdater constant is being sent. In all, the first run of `checkForUpdate()` will return update info for the highest release in the master branch. Later, when `doUpdate()` is called, that will be installed, and the `GUReleaseInfo` state variable will be rewritten with a new value to mark that that release has been installed. From there, future trips through the above code will simply pass whatever release information that state variable contains, so updates will only be flagged necessary when a new release, higher than the installed version, is detected in the Github repository.
+
+The `checkForUpdate()` call returns two values. If the first value is `nil`, an error has occured and the error message is returned in the second value. Otherwise, the first value is a boolean indicating whether or not an update exists in the repository. If the first value is boolean *false*, then no update is pending, and the second value is `nil`. If the first value is boolean *true*, then the second value contains a table that will tell `doUpdate()` what it needs to install, so you'll need to pass that structure to `doUpdate()` at some point.
+
+```
+if GitUpdater and canUpdate then
+    local newInfo, errMessage = pcall( GitUpdater.doUpdate, updateInfo )
+    if newInfo then
+        -- Store the new revision reference in our state variable (same name used above)
+        luup.variable_set( yourServiceId, "GUReleaseInfo", newInfo, myDeviceNum )
+        -- Reload Luup to make the plugin changes take effect.
         luup.reload()
     end
 end
 ```
 
-Let's break down how this works, line by line.
+Now, if there is an update pending, we pass back the second value returned by `checkForUpdate()` as the sole argument to `doUpdate()`, and it installs the revision found. If the process succeeds, `doUpdate()` returns an encoded string that should be stored and passed to future calls to `checkForUpdate()`. This creates a continuum of updates, so `checkForUpdate()` can know what the last installed version was, and correctly determine is anything newer is available. **You must store the return value of `doUpdate()` and pass it back in future calls to `checkForUpdate()`.
 
-Line 1 makes sure the GitUpdater module is loaded and locally available. If it has not been loaded,
-require() will load it. Either way, the module reference is returned.
+### Update "Channels" ###
 
-Line 2 gets the GitHub release ID of the currently installed version of the plugin.
+The example/walk-through above sets up your plugin to update from releases made on the Github "master" branch (not *commits*, *releases*--there's a difference!).
 
-Line 3 calls GitUpdater's checkForUpdate() function, passing the GitHub username, repository name,
-and the release ID determine in line 2. The fourth parameter, a boolean called "forceNewest",
-will always cause checkForUpdate() to indicate that an update should be made to latest GitHub release.
-Typically, this should only be set true if the current release ID is not store or otherwise unknown, as is shown here.
-checkForUpdate() will return two vallues: a boolean indicating updates are available (true), or not (false); and
-a table containing information about the newest release eligible.
+GitUpdater can update from either releases or head commits on any branch; which is determined by calling `getReleaseChannel()` or `getHeadChannel`, respectively, passing the name of the branch to check. For example, to update from head commits on the "stable" branch, we would change the code before the `checkForUpdate()` call above to look something like this:
 
-Line 4 determines if an update is available, and if so...
+```
+	lastVersionInfo = luup.variable_get( yourServiceId, "GUReleaseInfo", myDeviceNum ) or "0"
+	local forceUpdate = false
+	if lastVersionInfo == "0" then 
+		lastVersionInfo = getHeadChannel( "stable" ) -- or whatever branch you want
+		forceUpdate = true
+	end
+	canUpdate, updateInfo = pcall( GitUpdater.checkForUpdate, "githubuser", "reponame", lastVersionId, forceUpdate )
+```
 
-Line 5 calls doUpdate() to perform the update, passing the release information table previously returned
-by checkForUpdate(). The doUpdate() function itself returns two values. The first is a boolean success flag,
-which if true indicates that the update was completed. In this case, the second return value is the ID of the installed
-release, which the plugin must store so it can use it in subsequent calls to checkForUpdate(). If the first return value
-is false (update failed), the second value is an error message indicating the reason for the failure.
+If GitUpdater has previously run with another channel, then you must also set the state variable value to "0" to get a correct reinitialization and switch-over to the branch channel.
 
-Line 6 determines if the doUpdate() call was successful, and if so...
-
-Line 7 stores the release ID returned by doUpdate(), for the benefit of later calls to checkForUpdate().
-
-Line 8 restarts Luup. This is an important step after a successful update, as the new plugin code will not be running
-until Luup reloads.
-
-Lines 9 and 10 finish off the conditionals on lines 6 and 4, respectively.
+Likewise, would could then later to the release channel by putting back the original code from above, and settings the state variable value to "0" to force the switch-over.
 
 ### Handling the GitHub Side ###
 
@@ -129,45 +133,52 @@ as if they are part of the plugin source, provide a file called <tt>.guignore</t
 these listed files. Whether or not a <tt>.guignore</tt> file is provided, GitUpdater will always ignore the following files:
 <tt>.guignore, README.md, LICENSE</tt>.
 
+### Self-Updating GitUpdater ###
+
+To update GitUpdater, call `selfUpdate()`. If this function returns `true`, then GitUpdater updated itself
+and should be reloaded. The following code fragment shows a self-update update process with a module reload
+that does not require a Luup reload:
+
+```
+gu = require "GitUpdater"
+
+if gu.selfUpdate() then
+	-- Make the loader think we're not loaded
+	package.loaded.GitUpdater = nil
+	-- Reload
+	gu = require "GitUpdater"
+end
+...etc...
+```
+
+Of course, in practice, you want to guard the `require` and call to `selfUpdate()` using `pcall()`, as shown in the other examples. It has been omitted here only for clarity, but its use is always recommended.
+
 ## Additional Considerations for Developers ##
-
-### Defensive Loading ###
-
-Plugin developers can check to see if GitUpdater is installed and available by using an anonymous function/lambda
-to wrap require() in a pcall, thus:
-
-```
-local GitUpdater = nil
-pcall( function() GitUpdater = require('GitUpdater') end )
-if GitUpdater then
-    canUpdate, updateInfo = GitUpdater.checkForUpdate( ... etc ... )
-```
 
 ### Timing and Frequency of Updates ###
 
-The checkForUpdate() and doUpdate() calls have been coded as separate functions because it may
-be the case that a develop would want to make a user aware of an update, but defer the update until
+The `checkForUpdate()` and `doUpdate()` calls have been coded as separate functions because it may
+be the case that a developer would want to make a user aware of an update, but defer the update until
 a later time and/or after the user approves it. 
 
-Developers should not check for updates frequently, as in most cases, updates will be rare. However, since this
+Developers should not check for updates too frequently, as in most cases, updates will be rare. However, since this
 is effectively a polling interface to GitHub, it has to be called with sufficient frequency to meet the expectations
-of both the developer and user with regard to timeliness of updates once published. For this, once or twice a day
-is probably sufficient. The author would consider a frequency of once every four hours the limit, and anything more
+of both the developer and user with regard to timeliness of updates published. For this, once or twice a day
+is probably sufficient. The author considers a frequency of once every four hours to be the high limit, and anything more
 frequent is excessive.
 
-Making the check during the startup call to the plugin implementation seems useful. In practice, Luup reloads fairly
-frequently, so this approach may give a reasonable frequency to updates without addition coding necessary for timed
-checks. It also allows user to cause update checks, as Luup reloads are easily initiated by the user from the Vera
-dashboard.
+### Skipping Files: .guignore
+
+The file `.guignore`, if present in your repository, may contain a list of patterns that match files that should *not* be installed, one per line. These are Lua patterns, and they are matched against filenames only, not subdirectory names, as of this writing.
 
 ### Side-Effects ###
 
 Vera maintains versions of plugin code in its store (using svn or cvs?), and maintains an agreement between its version
 and an installed version. Directly changing the installed code on the Vera as I am currently doing in GitUpdater has no
-effect on the installed version number of the plugin, so even though the plugin may be getting updates, neither the Vera
+effect on the installed version number of the plugin shown, so even though the plugin may be getting updates, neither the Vera
 not the Vera Store are aware of any updates. This is probably OK for a while, but could leave to confusion on the part of the user.
 
-As a recommended hedge against such confusion, developers can periodically push their latest, stable release
+As a recommended hedge against such confusion, developers can (should) periodically push their latest, stable release
 from their GitHub repository into the Vera Store. Eventually, remote Veras will be updated through the Vera store, although
 that update will effectively install the same code that GitUpdater has already installed. Thus, this update merely updates
 Vera's idea of the version number, and a peaceful coexistence between the two systems should prevail. Of course, this
@@ -190,6 +201,79 @@ greater interests in other areas than what is going on in their plugin community
 ### Encrypted Plugin Files ###
 
 Currently, GitUpdater does not handle encryption of plugin files.
+
+## Reference
+
+### `checkForUpdate( githubUser, githubRepo, updateInfo [, forceUpdate ] )`
+
+The optional `forceUpdate` parameter causes `checkForUpdate()` to set up for `doUpdate()` to install the highest matching revision in the channel, regardless of what revision is currently installed. This is normally only used when switching channels.
+
+```
+local GitUpdater = pcall( require, "GitUpdater" )
+
+...
+
+-- Check for update to plugin; install if available.
+if GitUpdater then
+	-- Fetch updateInfo from wherever we last stored it...
+	local updateInfo = ...
+	-- Pass it to checkForUpdate()
+	local status, checkInfo = pcall( GitUpdater.checkForUpdate, "user", "repo", updateInfo )
+	if status == nil then
+		-- Error occurred
+		luup.log("GitUpdater threw an error checking for updates: "..tostring(checkInfo), 2)
+	elseif status == false then
+		-- No updates are pending
+	else
+		-- An update is pending. Install it now.
+		status, updateInfo = pcall( GitUpdater.doUpdate, checkInfo )
+		if not status then
+			luup.log("GitUpdater failed to install the available update: "..tostring(updateInfo), 2)
+		else
+			-- Successful install. Store updateInfo somewhere...
+			...
+			--- And reload Luup
+			luup.reload()
+		end
+	end
+end
+```
+
+### `doUpdate( checkInfo )`
+
+This function installs an update using information returned by `checkForUpdate()`. It returns a single value, which should be stored (e.g. in a state variable) and passed back to future calls to `checkForUpdate()`, so that it knows what the last version installed was and can determine if a newer version is eligible.
+
+Calls to `doUpdate()` should be made through `pcall()`, as it throws errors for any problem is has in its operation. When using `pcall()`, then, the return value of the first return value will be `nil` if there is an error, and a second return value will be passed containing the error message.
+
+```
+local updateInfo,errMessage = doUpdate( checkInfo )
+if not updateInfo then -- simple test OK in this case
+	print("An error occurred: "..tostring(errMessage))
+else
+	-- Successful update. Store updateInfo somewhere for later checkForUpdate() calls
+	...
+	-- And reload Luup to make the changes take effect
+	luup.reload()
+end
+```
+
+### `MASTER_RELEASES`
+
+This constant can be passed as the `updateInfo` parameter to `checkForUpdate()` to source updates from *releases* made from the "master" branch. This is the default source/channel.
+
+### `getReleaseChannel( branchName )`
+
+This function returns an `updateInfo` table that draws update information from *releases* on the supplied branch name, or "master" if the branch name is not supplied.
+
+The result value of this call is normally only used once, the first time `checkForUpdate()` is called in a new installation (or upon switching channels). It is recommended that the `forceUpdate` argument to `checkForUpdate()` also be passed *true* in this case. Thereafter, the value of whatever `doUpdate()` returns should be used (and `forceUpdate` not provided or *false*).
+
+### `getHeadChannel( branchName )`
+
+This function returns an `updateInfo` table that tells `checkForUpdate()` to watch the HEAD of the named branch ("master" by default). Any commit on the branch is considered an update eligible to be installed. 
+
+A common usage of this is to have a "stable" branch that publishes lightly-tested development releases that are believed to be stable. Following this branch, users can ride your "bleeding edge" of new work without riding what is perhaps the "hemorraging edge" of a direct development branch, which may contain completely untested code and work in progress that would often break users.
+
+The result value of this call is normally only used once, the first time `checkForUpdate()` is called in a new installation (or upon switching channels). It is recommended that the `forceUpdate` argument to `checkForUpdate()` also be passed *true* in this case. Thereafter, the value of whatever `doUpdate()` returns should be used (and `forceUpdate` not provided or *false*).
 
 ## Reporting Bugs/Enhancement Requests ##
 

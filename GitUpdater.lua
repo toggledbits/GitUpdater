@@ -3,17 +3,17 @@
 -- Distributed under GPL 3.0. For information see the LICENSE file at
 --luacheck: std lua51,module,read globals luup debugMode,ignore 542 611 612 614 111/_,no max line length
 
-module("GitUpdater", package.seeall)
+local _M = {}
 
-local _VERSION="0.1"
-local _VNUM = 19214
+_M._VERSION="0.2"
+_M._VNUM = 19273
+
 local debugMode = true
 
 local https = require("ssl.https")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
 local json = require('dkjson')
-local x
 
 local function dump(t, seen)
 	if t == nil then return "nil" end
@@ -219,18 +219,36 @@ local function loadIgnoreFiles( dir )
 	return t
 end
 
+-- Matches str against patterns in arr. Any pattern starting ! inverts test (true if not matching)
 local function matchesAny( arr, str )
+	local _,_,f = str:find("/([^/]+)$")
+	if not f then f = str end
 	for _,p in ipairs( arr ) do
-		if str:match( p ) then 
-			D("matchesAny() %1 matches %2", str, p)
-			return true 
+		local _,_,w = p:find("^!(.*)")
+		if w then
+			-- Invert pattern
+			if not ( f:match(w) or str:match(w) ) then return true end
+		else
+			if f:match(p) or str:match(p) then return true end
 		end
 	end
 	return false
 end
 
-DEFAULT_RELEASES = { ['type']="rel", branch="master" }
-DEFAULT_BRANCHHEAD = { ['type']="branch", branch="master" }
+local function Q(s)
+	return "'"..s:gsub( "'", "\\'" ).."'"
+end
+
+_M.MASTER_RELEASES = { ['type']="rel", branch="master" }
+
+local function getReleaseChannel( branch )
+	if ( branch or "master" ) == "master" then return _M.MASTER_RELEASES end
+	return { ['type']="rel", branch=branch }
+end
+
+local function getHeadChannel( branch )
+	return { ['type']="branch", branch=branch or "master" }
+end
 
 -- Check to see if there's an update. An update is a published release in the
 -- repository, not marked as draft or pre-release, with a publication date
@@ -238,10 +256,10 @@ DEFAULT_BRANCHHEAD = { ['type']="branch", branch="master" }
 -- must be supplied for this comparison. If we don't know what's installed,
 -- we don't install anything, unless forceHead is passed as true, in which case,
 -- we'll set up to unconditionally update to the newest available release.
-function checkForUpdate( guser, grepo, uInfo, forceHead )
+local function checkForUpdate( guser, grepo, uInfo, forceHead )
 	if not uInfo then
 		-- Default highest release associated with master branch
-		uInfo = shallowCopy( DEFAULT_RELEASES )
+		uInfo = shallowCopy( MASTER_RELEASES )
 	elseif type(uInfo) == "string" then
 		-- Base64 encoded round-trip string from previous doUpdate() call.
 		local mime = require "mime"
@@ -255,7 +273,7 @@ function checkForUpdate( guser, grepo, uInfo, forceHead )
 		else
 			uInfo = json.decode( s )
 			if not s then error("Invalid revision info data") end
-			if uInfo.version == nil or uInfo.version > _VNUM then
+			if uInfo.version == nil or uInfo.version > _M._VNUM then
 				error("Revision data is from a later version of GitUpdater. Please update GitUpdater!")
 			end
 		end
@@ -302,7 +320,7 @@ function checkForUpdate( guser, grepo, uInfo, forceHead )
 				D("%1 update available %2 (%3)", grepo, newest.tag_name, newest.id)
 			end
 			return true, {
-				id={ version=_VNUM, repo=grepo, user=guser, ['type']="rel", branch=uInfo.branch or "master", tag=newest.id, tagname=newest.tag_name, url=newest.tarball_url },
+				id={ version=_M._VNUM, repo=grepo, user=guser, ['type']="rel", branch=uInfo.branch or "master", tag=newest.id, tagname=newest.tag_name, url=newest.tarball_url },
 				text="release "..newest.name.." ("..newest.tag_name..", "..(uInfo.branch or "master")..")",
 				repository=guser.."/"..grepo,
 				branch=uInfo.branch or "master",
@@ -325,7 +343,7 @@ function checkForUpdate( guser, grepo, uInfo, forceHead )
 		D("checkForUpdate() checking head commit %1 against last %2", data.commit.sha, uInfo.commit)
 		if data.commit.sha ~= uInfo.commit or forceHead then
 			return true, {
-				id={ version=_VNUM, repo=grepo, user=guser, ['type']="branch", branch=uInfo.branch or "master", commit=data.commit.sha, url=data.commit.commit.tree.url },
+				id={ version=_M._VNUM, repo=grepo, user=guser, ['type']="branch", branch=uInfo.branch or "master", commit=data.commit.sha, url=data.commit.commit.tree.url },
 				text="branch "..(uInfo.branch or "master").." (head)",
 				repository=guser.."/"..grepo,
 				commit=data.commit.sha,
@@ -344,20 +362,23 @@ function checkForUpdate( guser, grepo, uInfo, forceHead )
 end
 
 -- Perform an update using information previously provided by checkForUpdate()
-function doUpdate( uInfo )
+local function doUpdate( uInfo, installPath )
+	installPath = installPath or "/etc/cmh-ludl/"
+	assert( installPath:match( "%/$"), "Install path must have trailing /" )
+	local mime = require "mime"
 	if uInfo.type == nil and (uInfo.id or {})['type'] ~= nil then
 		-- Caller passed full return structure, just grab "id" subkey, all we need here.
 		uInfo = uInfo.id
 	end
 	if uInfo.url == nil then error("Invalid update info; this update may already have been completed.") end
-	if uInfo.version == nil or uInfo.version > _VNUM then
+	if uInfo.version == nil or uInfo.version > _M._VNUM then
 		error("Update info is from a later version of GitUpdater. Please update GitUpdater!")
 	end
 	local guser = uInfo['user']
 	local grepo = uInfo.repo
 	D("doUpdate() attempting to update %1/%2 to %3 (%4)", guser, grepo, uInfo.tag, uInfo.id )
 	if not guser or not grepo then error "Invalid repo data" end
-	local tmpdir,instdir,instfiles,st
+	local tmpdir,instdir,instfiles,st,guinfo
 
 	if uInfo.type == "rel" then
 		-- Fetch the tarball with the release files
@@ -391,77 +412,104 @@ function doUpdate( uInfo )
 
 		-- Since the tarball has directory structure we can't control, locate
 		-- a device file in the un-tarred tree to figure out where things are.
-		instdir = locate("D_.*%.xml", tmpdir)
-		if not instdir then error "Unable to locate any device files in %1; unable to update." end
+		instdir = locate("I_.*%.xml", tmpdir)
+		if not instdir then error "Unable to locate any implementation files in %1; unable to update." end
 
 		-- Now get all the files in that directory, and copy them to /etc/cmh-ludl,
 		-- except any listed in a file called ".guignore" (if it exists).
 		instfiles = listFiles( instdir )
+		guinfo = exists( tmpdir .. ".guinfo" ) and ".guinfo"
 	elseif uInfo.type == "branch" then
 		-- Fetch all files in the specified commit and store them in the temporary directory.
-		local mime = require "mime"
 		instfiles = {}
 		tmpdir = os.tmpname():gsub( "/[^/]+$", "/" )
 		tmpdir = tmpdir .. grepo:lower() .. "-" .. uInfo.commit
-		instdir = tmpdir -- same as tmpdir for branch
 		st = os.execute( "mkdir -p '"..tmpdir.."'" )
 		if st ~= 0 then error("Unable to create temporary directory "..tmpdir) end
-		local data, httpStatus = jsonQuery( uInfo.url )
+		-- Note recursive fetch https://developer.github.com/v3/git/trees/#get-a-tree-recursively
+		local data, httpStatus = jsonQuery( uInfo.url .. "?recursive=1" )
 		if httpStatus ~= 200 then error("Failed to fetch commit tree "..uInfo.url) end
 		for _,ff in ipairs( data.tree or {} ) do
-			local fh = io.open( tmpdir .. "/" .. ff.path, "r" )
-			if fh then
-				fh:close()
-				D("doUpdate() %1/%2 already exists, not fetching", tmpdir, ff.path)
-				-- ??? future: check size? correct? non-zero?
-			else
-				D("doUpdate() fetching %1 to %2", ff.path, tmpdir)
-				local fs
-				fs, httpStatus = jsonQuery( ff.url )
-				if httpStatus ~= 200 then error("Failed to fetch file from commit tree "..ff.url) end
-				D("doUpdate() writing %1/%2", tmpdir, ff.path)
-				-- Write a temporary file first.
-				fh = io.open( tmpdir .. "/" .. ff.path .. ".tmp", "w" )
-				if fs.content ~= "" then
-					if fs.encoding == "base64" then
-						fs.content = fs.content:gsub( "[\r\n]+", "" )
-						fh:write( (mime.unb64( fs.content )) )
-					else
-						fh:close()
-						error("Unknown encoding "..tostring(fs.encoding).. " for "..ff.path)
+			if ff.type == "tree" then
+				D("doUpdate() creating subdirectory for tree %1 as %1/%2", ff.path, tmpdir, ff.path)
+				os.execute( "mkdir -p '" .. tmpdir .. "/" .. ff.path .. "'" )
+			elseif ff.type == "blob" then
+				local fh = io.open( tmpdir .. "/" .. ff.path, "r" )
+				if fh then
+					fh:close()
+					D("doUpdate() %1/%2 already exists, not fetching", tmpdir, ff.path)
+					-- ??? future: check size? correct? non-zero?
+				else
+					D("doUpdate() fetching %1 to %2", ff.path, tmpdir)
+					local fs
+					fs, httpStatus = jsonQuery( ff.url )
+					if httpStatus ~= 200 then error("Failed to fetch file from commit tree "..ff.url) end
+					D("doUpdate() writing %1/%2", tmpdir, ff.path)
+					-- Write a temporary file first. Write binary, so nothing is translated.
+					fh = io.open( tmpdir .. "/" .. ff.path .. ".tmp", "wb" )
+					if fs.content ~= "" then
+						if fs.encoding == "base64" then
+							fs.content = fs.content:gsub( "[\r\n]+", "" )
+							fh:write( (mime.unb64( fs.content )) )
+						else
+							fh:close()
+							error("Unknown encoding "..tostring(fs.encoding).. " for "..ff.path)
+						end
 					end
+					fh:close()
+					fs.content = nil
+					-- Move the finished temporary file into place as final.
+					os.execute( "mv -f '"..tmpdir.."/"..ff.path..".tmp' '"..tmpdir.."/"..ff.path.."'" )
 				end
-				fh:close()
-				fs.content = nil
-				-- Move the finished temporary file into place as final.
-				os.execute( "mv -f '"..tmpdir.."/"..ff.path..".tmp' '"..tmpdir.."/"..ff.path.."'" )
-			end
-			table.insert( instfiles, { name=ff.path, ['type']="f", mode=ff.mode } )
-			if false and ff.mode then
-				-- Set file mode as specified?
+				local file = ff.path:match( "[^/]+$" )
+				local path = (#ff.path > #file) and ff.path:sub( 1, #ff.path-#file-1 ) or nil
+				table.insert( instfiles, { name=file, ['type']="f", mode=ff.mode, path=path } )
+				D("doUpdate() listing %1 as dir=%2, file=%3", ff.path, path, file)
+				if false and ff.mode then
+					-- Set file mode as specified?
+				else
+					os.execute( "chmod 0644 '"..tmpdir.."/"..ff.path.."'" )
+				end
+				if not instdir and file:match("I_%w+%.xml$") then
+					instdir = path
+					D("doUpdate() marking instdir %1", instdir)
+				end
+				if ff.path:match( "^%.guinfo$" ) then
+					guinfo = ".guinfo"
+				end
 			else
-				os.execute( "chmod 0644 '"..tmpdir.."/"..ff.path.."'" )
+				D("doUpdate() ignoring unknown object type %1", ff.type)
 			end
 		end
 	end
 
+	-- If we have an info file telling us what to install, set up for that. 
+	-- Otherwise, set up to filter out all files not adjacent to the impl file.
 	local nCopy = 0
-	local ignoreFiles = loadIgnoreFiles( instdir )
+	local ignoreFiles = loadIgnoreFiles( tmpdir )
+	if guinfo then
+	else
+		-- If we know install directory (where impl lives), as non-match pattern
+		if instdir then table.insert( ignoreFiles, 1, "!^"..instdir.."/" ) end
+	end
+	D("doUpdate() ignoreFiles=%1", ignoreFiles)
 	for _,ff in ipairs( instfiles ) do
-		D("doUpdate() considering copying %1/%2 (%3)", instdir, ff.name, ff.type)
-		if ff.type == "f" and not matchesAny( ignoreFiles, ff.name ) then
-			D("doUpdate() copying %1/%2 to /etc/cmh-ludl/", instdir, ff.name )
-			if type(luup) == "table" then
-				-- On Vera, compress the source file in the installation directory
-				st = os.execute("umask 022 && pluto-lzo c '" .. instdir .. "/" .. ff.name .. "' '/etc/cmh-ludl/" .. ff.name .. ".lzo'")
-				if st == 0 then os.execute( "rm -f -- '/etc/cmh-ludl/" .. ff.name .. "'" ) end
+		local fp = ff.path and ( ff.path .. "/" .. ff.name ) or ff.name
+		D("doUpdate() considering copying %1/%2 (%3)", tmpdir, fp, ff.type)
+		if ff.type == "f" and not matchesAny( ignoreFiles, fp ) then
+			D("doUpdate() copying %1/%2 to %3", tmpdir .. fp, installPath )
+			if luup.openLuup then
+				-- OpenLuup, just copy the file.
+				print("umask 022 && cp -fp -- " .. Q(tmpdir .. "/" .. fp) .. " " .. Q(installPath))
+				st = os.execute("umask 022 && cp -fp -- " .. Q(tmpdir .. "/" .. fp) .. " " .. Q(installPath))
 			else
-				-- Elsewhere, just copy it. ??? Can we detect openLuup somehow?
-				st = os.execute("umask 022 && cp -fp '" .. instdir .. "/" .. ff.name .. "' /etc/cmh-ludl/")
+				-- On Vera, compress the source file in the installation directory
+				st = os.execute("umask 022 && pluto-lzo c " .. Q(tmpdir .. "/" .. fp) .. " " .. Q(installPath .. ff.name .. ".lzo"))
+				if st == 0 then os.execute( "rm -f -- " .. Q(installPath .. ff.name)) end
 			end
 			if st == 0 then nCopy = nCopy + 1
 			else
-				D("doUpdate(): failed to install %1, status %2... that's not good!", instdir .. "/" .. ff.name, st)
+				D("doUpdate(): failed to install %1 to %3, status %2... that's not good!", tmpdir .. "/" .. fp, st, installPath)
 			end
 		end
 	end
@@ -472,8 +520,9 @@ function doUpdate( uInfo )
 	end
 
 	-- If nothing was copied, it's the same as not updating, so bail.
+	-- ??? What if only partial copy
 	if nCopy == 0 then
-		error("Unable to successfully install any of the release files from " .. instdir)
+		error("Unable to successfully install any of the release files from " .. tmptdir)
 	end
 
 	-- Finished. Return a "round trip" string that can be passed to checkUpdate()
@@ -481,5 +530,40 @@ function doUpdate( uInfo )
 	D("doUpdate() update of %1 to %2 %3 complete, %4 files installed.", grepo, uInfo.branch, uInfo.tag or uInfo.commit, nCopy)
 	uInfo = shallowCopy( uInfo ) -- Don't modify passed-in original
 	uInfo.url = nil -- remove from returned struct (indicates final)
-	return (require("mime").b64( json.encode( uInfo )))
+	uInfo.installed = os.time()
+	return mime.b64( json.encode( uInfo ) )
 end
+
+-- NOTE: DO NOT USE THIS AS AN EXAMPLE OF HOW TO USE GITUPDATER! THIS IS A SPECIAL UPDATE PROCESS
+--       INTENDED ONLY FOR SELF-UPDATING OF THIS LIBRARY. SEE THE DOCS FOR CORRECT USAGE.
+local function selfUpdate( uinfo, forceUpdate )
+	if forceUpdate == nil then forceUpdate = uinfo == nil or uinfo == _M.MASTER_RELEASES end
+	local _,upid = checkForUpdate( "toggledbits", "GitUpdater", uinfo or _M.MASTER_RELEASES, forceUpdate )
+	D("%1", upid)
+	if forceUpdate or upid.tag ~= string.format("v%s", _M._VERSION) then
+		D("GitUpdater self-updating from v%1 to %2", _M._VERSION, upid.tag)
+		local path
+		if luup.openLuup then
+			local loader = require "openLuup.loader"
+			if loader.find_file then
+				path = loader.find_file( "GitUpdater.lua" ):gsub( "GitUpdater.lua$", "" )
+			else
+				path = "./"
+			end
+		end
+		doUpdate( upid, path )
+		return true
+	else
+		D("Up to date -- we are v%1, release is %2", _M._VERSION, upid.tag)
+		return false
+	end
+end
+
+-- Function exports
+_M.getReleaseChannel = getReleaseChannel
+_M.getBranchChannel = getBranchChannel
+_M.checkForUpdate = checkForUpdate
+_M.doUpdate = doUpdate
+_M.selfUpdate = selfUpdate
+
+return _M

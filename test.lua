@@ -4,10 +4,15 @@ if gu == nil then
 	print("GitUpdater is not installed.")
 	return
 end
+print(gu)
 
 json = require "dkjson"
 
-status,canUpdate,updateInfo = pcall( gu.checkForUpdate, "toggledbits", "Submasters-Vera", { ['type']="branch", branch="master" }, true )
+for k,v in pairs(gu) do print(k,v) end
+
+local updateInfo = gu.getBranchChannel( "stable" )
+
+status,canUpdate,updateInfo = pcall( gu.checkForUpdate, "toggledbits", "Switchboard-Vera", updateInfo, true )
 if not status then
 	print("checkForUpdate threw an error:", canUpdate)
 	os.exit(1)
@@ -25,7 +30,7 @@ if canUpdate then
     -- passed in all subsequent calls to checkForUpdate()
     print("UPDATE COMPLETE! Info to store is",info)
 	
-	canUpdate,updateInfo = gu.checkForUpdate( "toggledbits", "Submasters-Vera", info )
+	canUpdate,updateInfo = gu.checkForUpdate( "toggledbits", "Switchboard-Vera", info )
 	print("Round-trip status is",canUpdate,updateInfo)
 else 
     print("NO UPDATE AVAILABLE")
